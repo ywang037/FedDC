@@ -2,45 +2,68 @@ from utils_libs import *
 from utils_dataset import *
 from utils_models import *
 from utils_general import *
-from tensorboardX import SummaryWriter
+# from tensorboardX import SummaryWriter
 
 ### Methods
-def train_FedAvg(data_obj, act_prob ,learning_rate, batch_size, epoch, 
-                                     com_amount, print_per, weight_decay, 
-                                     model_func, init_model, sch_step, sch_gamma,
-                                     save_period, suffix = '', trial=True, data_path='', rand_seed=0, lr_decay_per_round=1):
+def train_FedAvg(
+        data_obj, 
+        act_prob,
+        learning_rate, 
+        batch_size, 
+        epoch, 
+        com_amount, 
+        print_per, 
+        weight_decay, 
+        model_func, 
+        init_model, 
+        sch_step, 
+        sch_gamma,
+        save_period, 
+        suffix = '', 
+        trial=True, 
+        data_path='', 
+        rand_seed=0, 
+        lr_decay_per_round=1
+    ):
+    # variables used for save results, can be replaced
     suffix = 'FedAvg_' + suffix
     suffix += '_S%d_F%f_Lr%f_%d_%f_B%d_E%d_W%f' %(save_period, act_prob, learning_rate, sch_step, sch_gamma, batch_size, epoch, weight_decay)
    
     suffix += '_lrdecay%f' %lr_decay_per_round
     suffix += '_seed%d' %rand_seed
 
-    n_clnt=data_obj.n_client
+    n_clnt=data_obj.n_client # number of client?
 
-    clnt_x = data_obj.clnt_x; clnt_y=data_obj.clnt_y
+    clnt_x = data_obj.clnt_x # list of client data x
+    clnt_y = data_obj.clnt_y # list of client targets y
+    cent_x = np.concatenate(clnt_x, axis=0) # centralized data x
+    cent_y = np.concatenate(clnt_y, axis=0) # centralized targets y
     
-    cent_x = np.concatenate(clnt_x, axis=0)
-    cent_y = np.concatenate(clnt_y, axis=0)
-    
+    # weights for aggregation
     weight_list = np.asarray([len(clnt_y[i]) for i in range(n_clnt)])
     weight_list = weight_list.reshape((n_clnt, 1))
-        
+
+    # create a save directory    
     if (not trial) and (not os.path.exists('%sModel/%s/%s' %(data_path, data_obj.name, suffix))):
         os.mkdir('%sModel/%s/%s' %(data_path, data_obj.name, suffix))
-        
-    n_save_instances = int(com_amount / save_period)
-    fed_mdls_sel = list(range(n_save_instances)); fed_mdls_all = list(range(n_save_instances))
+
+
+    n_save_instances = int(com_amount / save_period) # com_amount is number of rounds, save_period is period of rounds to save
+    fed_mdls_sel = list(range(n_save_instances))
+    fed_mdls_all = list(range(n_save_instances))
     
-    trn_perf_sel = np.zeros((com_amount, 2)); trn_perf_all = np.zeros((com_amount, 2))
-    tst_perf_sel = np.zeros((com_amount, 2)); tst_perf_all = np.zeros((com_amount, 2))
+    trn_perf_sel = np.zeros((com_amount, 2)) # train performance selected clients
+    trn_perf_all = np.zeros((com_amount, 2)) # train performance all clients
+    tst_perf_sel = np.zeros((com_amount, 2)) # test performance selectd clients
+    tst_perf_all = np.zeros((com_amount, 2)) # test performane all clients - keep and monitor this one
     n_par = len(get_mdl_params([model_func()])[0])
 
     init_par_list=get_mdl_params([init_model], n_par)[0]
     clnt_params_list=np.ones(n_clnt).astype('float32').reshape(-1, 1) * init_par_list.reshape(1, -1) # n_clnt X n_par
     
     saved_itr = -1
-    # writer object is for tensorboard visualization, comment out if not needed
-    writer = SummaryWriter('%sRuns/%s/%s' %(data_path, data_obj.name, suffix))
+    # # writer object is for tensorboard visualization, comment out if not needed
+    # writer = SummaryWriter('%sRuns/%s/%s' %(data_path, data_obj.name, suffix))
     
     if not trial:
         # Check if there are past saved iterates
@@ -54,6 +77,7 @@ def train_FedAvg(data_obj, act_prob ,learning_rate, batch_size, epoch,
                                %(data_path, data_obj.name, suffix, i+1)))
                 fed_model.eval()
                 fed_model = fed_model.to(device)
+                
                 # Freeze model
                 for params in fed_model.parameters():
                     params.requires_grad = False
@@ -66,6 +90,7 @@ def train_FedAvg(data_obj, act_prob ,learning_rate, batch_size, epoch,
                                %(data_path, data_obj.name, suffix, i+1)))
                 fed_model.eval()
                 fed_model = fed_model.to(device)
+                
                 # Freeze model
                 for params in fed_model.parameters():
                     params.requires_grad = False
@@ -84,6 +109,8 @@ def train_FedAvg(data_obj, act_prob ,learning_rate, batch_size, epoch,
     
     if (trial) or (not os.path.exists('%sModel/%s/%s/%dcom_sel.pt' %(data_path, data_obj.name, suffix, com_amount))):         
         clnt_models = list(range(n_clnt))
+        
+        # initialize global model: avg_model, and local model: all_model 
         if saved_itr == -1:
             avg_model = model_func().to(device)
             avg_model.load_state_dict(copy.deepcopy(dict(init_model.named_parameters())))
@@ -92,33 +119,40 @@ def train_FedAvg(data_obj, act_prob ,learning_rate, batch_size, epoch,
             all_model.load_state_dict(copy.deepcopy(dict(init_model.named_parameters())))
 
         else:
-            # Load recent one
+            # Load the recently saved one
             avg_model = model_func().to(device)
-            avg_model.load_state_dict(torch.load('%sModel/%s/%s/%dcom_sel.pt' 
-                       %(data_path, data_obj.name, suffix, (saved_itr+1))))
+            avg_model.load_state_dict(
+                torch.load('%sModel/%s/%s/%dcom_sel.pt' %(data_path, data_obj.name, suffix, (saved_itr+1)))
+                )
             
             all_model = model_func().to(device)
-            all_model.load_state_dict(torch.load('%sModel/%s/%s/%dcom_all.pt' 
-                       %(data_path, data_obj.name, suffix, (saved_itr+1))))
+            all_model.load_state_dict(
+                torch.load('%sModel/%s/%s/%dcom_all.pt' %(data_path, data_obj.name, suffix, (saved_itr+1)))
+                )
           
         for i in range(saved_itr+1, com_amount):
             # Train if doesn't exist
             ### Fix randomness
-            inc_seed = 0
-            while(True):
-                np.random.seed(i + rand_seed + inc_seed)
-                act_list    = np.random.uniform(size=n_clnt)
-                act_clients = act_list <= act_prob
-                selected_clnts = np.sort(np.where(act_clients)[0])
-                inc_seed += 1
-                # Choose at least one client in each synch
-                if len(selected_clnts) != 0:
-                    break
             
+            # # WY NOTE: client selection for every round with a different seed
+            # inc_seed = 0
+            # while(True):
+            #     np.random.seed(i + rand_seed + inc_seed)
+            #     act_list    = np.random.uniform(size=n_clnt)
+            #     act_clients = act_list <= act_prob
+            #     selected_clnts = np.sort(np.where(act_clients)[0]) # id of selected clients
+            #     inc_seed += 1
+            #     # Choose at least one client in each synch
+            #     if len(selected_clnts) != 0:
+            #         break
+            
+            selected_clnts = list(range(n_clnt)) # WY added to include all clients
             print('Selected Clients: %s' %(', '.join(['%2d' %item for item in selected_clnts])))
             
             del clnt_models
             clnt_models = list(range(n_clnt))
+            
+            # WY NOTE: loop over clients for local update
             for clnt in selected_clnts:
                 print('---- Training client %d' %clnt)
                 trn_x = clnt_x[clnt]
@@ -126,13 +160,12 @@ def train_FedAvg(data_obj, act_prob ,learning_rate, batch_size, epoch,
                 tst_x = False
                 tst_y = False
             
-            
-                clnt_models[clnt] = model_func().to(device)
-                
+                clnt_models[clnt] = model_func().to(device)    
                 clnt_models[clnt].load_state_dict(copy.deepcopy(dict(avg_model.named_parameters())))
 
                 for params in clnt_models[clnt].parameters():
                     params.requires_grad = True
+                
                 clnt_models[clnt] = train_model(clnt_models[clnt], trn_x, trn_y, 
                                                 tst_x, tst_y, 
                                                 learning_rate * (lr_decay_per_round ** i), batch_size, epoch, print_per,
@@ -142,86 +175,81 @@ def train_FedAvg(data_obj, act_prob ,learning_rate, batch_size, epoch,
                 clnt_params_list[clnt] = get_mdl_params([clnt_models[clnt]], n_par)[0]
 
             # Scale with weights
-            
             avg_model = set_client_from_params(model_func(), np.sum(clnt_params_list[selected_clnts]*weight_list[selected_clnts]/np.sum(weight_list[selected_clnts]), axis = 0))
             all_model = set_client_from_params(model_func(), np.sum(clnt_params_list*weight_list/np.sum(weight_list), axis = 0))
 
-            ###
-            loss_tst, acc_tst = get_acc_loss(data_obj.tst_x, data_obj.tst_y, 
-                                             avg_model, data_obj.dataset, 0)
+            # test performance of selected clients over centralized test dataset
+            loss_tst, acc_tst = get_acc_loss(data_obj.tst_x, data_obj.tst_y, avg_model, data_obj.dataset, 0)
             tst_perf_sel[i] = [loss_tst, acc_tst]
-
-            print("**** Communication sel %3d, Test Accuracy: %.4f, Loss: %.4f" 
-                  %(i+1, acc_tst, loss_tst))
+            print("**** Communication sel %3d, Test Accuracy: %.4f, Loss: %.4f"  %(i+1, acc_tst, loss_tst))
             
-            ###
-            loss_tst, acc_tst = get_acc_loss(cent_x, cent_y, 
-                                             avg_model, data_obj.dataset, 0)
+            # train performance of selected clients over the pooled train set of clients
+            loss_tst, acc_tst = get_acc_loss(cent_x, cent_y, avg_model, data_obj.dataset, 0)
             trn_perf_sel[i] = [loss_tst, acc_tst]
-            print("**** Communication sel %3d, Cent Accuracy: %.4f, Loss: %.4f" 
-                  %(i+1, acc_tst, loss_tst))
+            print("**** Communication sel %3d, Cent Accuracy: %.4f, Loss: %.4f" %(i+1, acc_tst, loss_tst))
             
-            
-            ###
-            loss_tst, acc_tst = get_acc_loss(data_obj.tst_x, data_obj.tst_y, 
-                                             all_model, data_obj.dataset, 0)
+            # test performance of all clients over centralized test dataset
+            # WY NOTE: this is the only accuracy you need to keep and monitor
+            loss_tst, acc_tst = get_acc_loss(data_obj.tst_x, data_obj.tst_y, all_model, data_obj.dataset, 0)
             tst_perf_all[i] = [loss_tst, acc_tst]
-
-            print("**** Communication all %3d, Test Accuracy: %.4f, Loss: %.4f" 
-                  %(i+1, acc_tst, loss_tst))
+            print("**** Communication all %3d, Test Accuracy: %.4f, Loss: %.4f" %(i+1, acc_tst, loss_tst))
             
-            ###
-            loss_tst, acc_tst = get_acc_loss(cent_x, cent_y, 
-                                             all_model, data_obj.dataset, 0)
+            # train performance of all clients over over the pooled train set of clients
+            loss_tst, acc_tst = get_acc_loss(cent_x, cent_y, all_model, data_obj.dataset, 0)
             trn_perf_all[i] = [loss_tst, acc_tst]
-            print("**** Communication all %3d, Cent Accuracy: %.4f, Loss: %.4f" 
-                  %(i+1, acc_tst, loss_tst))
+            print("**** Communication all %3d, Cent Accuracy: %.4f, Loss: %.4f" %(i+1, acc_tst, loss_tst))
             
             
-            writer.add_scalars('Loss/train_wd', 
-                   {
-                       'Sel clients':get_acc_loss(cent_x, cent_y, avg_model, data_obj.dataset, weight_decay)[0],
-                       'All clients':get_acc_loss(cent_x, cent_y, all_model, data_obj.dataset, weight_decay)[0]
-                   }, i
-                  )
+            # writer.add_scalars('Loss/train_wd', 
+            #        {
+            #            'Sel clients':get_acc_loss(cent_x, cent_y, avg_model, data_obj.dataset, weight_decay)[0],
+            #            'All clients':get_acc_loss(cent_x, cent_y, all_model, data_obj.dataset, weight_decay)[0]
+            #        }, i
+            #       )
             
-            writer.add_scalars('Loss/train', 
-                   {
-                       'Sel clients':trn_perf_sel[i][0],
-                       'All clients':trn_perf_all[i][0]
-                   }, i
-                  )
+            # writer.add_scalars('Loss/train', 
+            #        {
+            #            'Sel clients':trn_perf_sel[i][0],
+            #            'All clients':trn_perf_all[i][0]
+            #        }, i
+            #       )
             
-            writer.add_scalars('Accuracy/train', 
-                   {
-                       'Sel clients':trn_perf_sel[i][1],
-                       'All clients':trn_perf_all[i][1]
-                   }, i
-                  )
+            # writer.add_scalars('Accuracy/train', 
+            #        {
+            #            'Sel clients':trn_perf_sel[i][1],
+            #            'All clients':trn_perf_all[i][1]
+            #        }, i
+            #       )
             
             
-            writer.add_scalars('Loss/test', 
-                   {
-                       'Sel clients':tst_perf_sel[i][0],
-                       'All clients':tst_perf_all[i][0]
-                   }, i
-                  )
+            # writer.add_scalars('Loss/test', 
+            #        {
+            #            'Sel clients':tst_perf_sel[i][0],
+            #            'All clients':tst_perf_all[i][0]
+            #        }, i
+            #       )
             
-            writer.add_scalars('Accuracy/test', 
-                   {
-                       'Sel clients':tst_perf_sel[i][1],
-                       'All clients':tst_perf_all[i][1]
-                   }, i
-                  )
+            # writer.add_scalars('Accuracy/test', 
+            #        {
+            #            'Sel clients':tst_perf_sel[i][1],
+            #            'All clients':tst_perf_all[i][1]
+            #        }, i
+            #       )
                         
-            # Freeze model
+            # Freeze model, WY NOTE: but why??
             for params in avg_model.parameters():
                 params.requires_grad = False
+            
+            # save results
             if (not trial) and ((i+1) % save_period == 0):
-                torch.save(avg_model.state_dict(), '%sModel/%s/%s/%dcom_sel.pt' 
-                               %(data_path, data_obj.name, suffix, (i+1)))                
-                torch.save(all_model.state_dict(), '%sModel/%s/%s/%dcom_all.pt' 
-                               %(data_path, data_obj.name, suffix, (i+1)))
+                torch.save(
+                    avg_model.state_dict(), 
+                    '%sModel/%s/%s/%dcom_sel.pt' %(data_path, data_obj.name, suffix, (i+1))
+                    )                
+                torch.save(
+                    all_model.state_dict(), 
+                    '%sModel/%s/%s/%dcom_all.pt' %(data_path, data_obj.name, suffix, (i+1))
+                    )
                 
                 np.save('%sModel/%s/%s/%dcom_trn_perf_sel.npy' %(data_path, data_obj.name, suffix, (i+1)), trn_perf_sel[:i+1])
                 np.save('%sModel/%s/%s/%dcom_tst_perf_sel.npy' %(data_path, data_obj.name, suffix, (i+1)), tst_perf_sel[:i+1])
@@ -245,7 +273,8 @@ def train_FedAvg(data_obj, act_prob ,learning_rate, batch_size, epoch,
             if ((i+1) % save_period == 0):
                 fed_mdls_sel[i//save_period] = avg_model
                 fed_mdls_all[i//save_period] = all_model
-                
+    
+    # no need to return these?
     return fed_mdls_sel, trn_perf_sel, tst_perf_sel, fed_mdls_all, trn_perf_all, tst_perf_all
 
 def train_FedProx(data_obj, act_prob ,learning_rate, batch_size, epoch, 
@@ -285,8 +314,8 @@ def train_FedProx(data_obj, act_prob ,learning_rate, batch_size, epoch,
     
     saved_itr = -1
     
-    # writer object is for tensorboard visualization, comment out if not needed
-    writer = SummaryWriter('%sRuns/%s/%s' %(data_path, data_obj.name, suffix))
+    # # writer object is for tensorboard visualization, comment out if not needed
+    # writer = SummaryWriter('%sRuns/%s/%s' %(data_path, data_obj.name, suffix))
     
     
     if not trial:
@@ -429,41 +458,41 @@ def train_FedProx(data_obj, act_prob ,learning_rate, batch_size, epoch,
                   %(i+1, acc_tst, loss_tst))
             
             
-            writer.add_scalars('Loss/train_wd', 
-                   {
-                       'Sel clients':get_acc_loss(cent_x, cent_y, avg_model, data_obj.dataset, weight_decay)[0],
-                       'All clients':get_acc_loss(cent_x, cent_y, all_model, data_obj.dataset, weight_decay)[0]
-                   }, i
-                  )
+            # writer.add_scalars('Loss/train_wd', 
+            #        {
+            #            'Sel clients':get_acc_loss(cent_x, cent_y, avg_model, data_obj.dataset, weight_decay)[0],
+            #            'All clients':get_acc_loss(cent_x, cent_y, all_model, data_obj.dataset, weight_decay)[0]
+            #        }, i
+            #       )
             
-            writer.add_scalars('Loss/train', 
-                   {
-                       'Sel clients':trn_perf_sel[i][0],
-                       'All clients':trn_perf_all[i][0]
-                   }, i
-                  )
+            # writer.add_scalars('Loss/train', 
+            #        {
+            #            'Sel clients':trn_perf_sel[i][0],
+            #            'All clients':trn_perf_all[i][0]
+            #        }, i
+            #       )
             
-            writer.add_scalars('Accuracy/train', 
-                   {
-                       'Sel clients':trn_perf_sel[i][1],
-                       'All clients':trn_perf_all[i][1]
-                   }, i
-                  )
+            # writer.add_scalars('Accuracy/train', 
+            #        {
+            #            'Sel clients':trn_perf_sel[i][1],
+            #            'All clients':trn_perf_all[i][1]
+            #        }, i
+            #       )
             
             
-            writer.add_scalars('Loss/test', 
-                   {
-                       'Sel clients':tst_perf_sel[i][0],
-                       'All clients':tst_perf_all[i][0]
-                   }, i
-                  )
+            # writer.add_scalars('Loss/test', 
+            #        {
+            #            'Sel clients':tst_perf_sel[i][0],
+            #            'All clients':tst_perf_all[i][0]
+            #        }, i
+            #       )
             
-            writer.add_scalars('Accuracy/test', 
-                   {
-                       'Sel clients':tst_perf_sel[i][1],
-                       'All clients':tst_perf_all[i][1]
-                   }, i
-                  )            
+            # writer.add_scalars('Accuracy/test', 
+            #        {
+            #            'Sel clients':tst_perf_sel[i][1],
+            #            'All clients':tst_perf_all[i][1]
+            #        }, i
+            #       )            
 
             # Freeze model
             for params in avg_model.parameters():
@@ -533,8 +562,8 @@ def train_SCAFFOLD(data_obj, act_prob ,learning_rate, batch_size, n_minibatch,
     clnt_params_list=np.ones(n_clnt).astype('float32').reshape(-1, 1) * init_par_list.reshape(1, -1) # n_clnt X n_par
     
     saved_itr = -1
-    # writer object is for tensorboard visualization, comment out if not needed
-    writer = SummaryWriter('%sRuns/%s/%s' %(data_path, data_obj.name, suffix))
+    # # writer object is for tensorboard visualization, comment out if not needed
+    # writer = SummaryWriter('%sRuns/%s/%s' %(data_path, data_obj.name, suffix))
     
     if not trial:
         # Check if there are past saved iterates
@@ -686,41 +715,41 @@ def train_SCAFFOLD(data_obj, act_prob ,learning_rate, batch_size, n_minibatch,
                   %(i+1, acc_tst, loss_tst))
             
             
-            writer.add_scalars('Loss/train_wd', 
-                   {
-                       'Sel clients':get_acc_loss(cent_x, cent_y, avg_model, data_obj.dataset, weight_decay)[0],
-                       'All clients':get_acc_loss(cent_x, cent_y, all_model, data_obj.dataset, weight_decay)[0]
-                   }, i
-                  )
+            # writer.add_scalars('Loss/train_wd', 
+            #        {
+            #            'Sel clients':get_acc_loss(cent_x, cent_y, avg_model, data_obj.dataset, weight_decay)[0],
+            #            'All clients':get_acc_loss(cent_x, cent_y, all_model, data_obj.dataset, weight_decay)[0]
+            #        }, i
+            #       )
             
-            writer.add_scalars('Loss/train', 
-                   {
-                       'Sel clients':trn_perf_sel[i][0],
-                       'All clients':trn_perf_all[i][0]
-                   }, i
-                  )
+            # writer.add_scalars('Loss/train', 
+            #        {
+            #            'Sel clients':trn_perf_sel[i][0],
+            #            'All clients':trn_perf_all[i][0]
+            #        }, i
+            #       )
             
-            writer.add_scalars('Accuracy/train', 
-                   {
-                       'Sel clients':trn_perf_sel[i][1],
-                       'All clients':trn_perf_all[i][1]
-                   }, i
-                  )
+            # writer.add_scalars('Accuracy/train', 
+            #        {
+            #            'Sel clients':trn_perf_sel[i][1],
+            #            'All clients':trn_perf_all[i][1]
+            #        }, i
+            #       )
             
             
-            writer.add_scalars('Loss/test', 
-                   {
-                       'Sel clients':tst_perf_sel[i][0],
-                       'All clients':tst_perf_all[i][0]
-                   }, i
-                  )
+            # writer.add_scalars('Loss/test', 
+            #        {
+            #            'Sel clients':tst_perf_sel[i][0],
+            #            'All clients':tst_perf_all[i][0]
+            #        }, i
+            #       )
             
-            writer.add_scalars('Accuracy/test', 
-                   {
-                       'Sel clients':tst_perf_sel[i][1],
-                       'All clients':tst_perf_all[i][1]
-                   }, i
-                  )
+            # writer.add_scalars('Accuracy/test', 
+            #        {
+            #            'Sel clients':tst_perf_sel[i][1],
+            #            'All clients':tst_perf_all[i][1]
+            #        }, i
+            #       )
             
             # Freeze model
             for params in avg_model.parameters():
@@ -802,8 +831,8 @@ def train_FedDyn(data_obj, act_prob,
     clnt_models = list(range(n_clnt))
     saved_itr = -1
             
-    # writer object is for tensorboard visualization, comment out if not needed
-    writer = SummaryWriter('%sRuns/%s/%s' %(data_path, data_obj.name, suffix))
+    # # writer object is for tensorboard visualization, comment out if not needed
+    # writer = SummaryWriter('%sRuns/%s/%s' %(data_path, data_obj.name, suffix))
 
     if not trial:
         # Check if there are past saved iterates
@@ -965,29 +994,29 @@ def train_FedDyn(data_obj, act_prob,
             trn_cur_cld_perf[i] = [loss_tst, acc_tst]
             
                         
-            writer.add_scalars('Loss/train', 
-                   {
-                       'Sel clients':trn_sel_clt_perf[i][0],
-                       'All clients':trn_all_clt_perf[i][0],
-                       'Current cloud':trn_cur_cld_perf[i][0]
-                   }, i
-                  )
+            # writer.add_scalars('Loss/train', 
+            #        {
+            #            'Sel clients':trn_sel_clt_perf[i][0],
+            #            'All clients':trn_all_clt_perf[i][0],
+            #            'Current cloud':trn_cur_cld_perf[i][0]
+            #        }, i
+            #       )
             
-            writer.add_scalars('Accuracy/train', 
-                   {
-                       'Sel clients':trn_sel_clt_perf[i][1],
-                       'All clients':trn_all_clt_perf[i][1],
-                       'Current cloud':trn_cur_cld_perf[i][1]
-                   }, i
-                  )
+            # writer.add_scalars('Accuracy/train', 
+            #        {
+            #            'Sel clients':trn_sel_clt_perf[i][1],
+            #            'All clients':trn_all_clt_perf[i][1],
+            #            'Current cloud':trn_cur_cld_perf[i][1]
+            #        }, i
+            #       )
             
-            writer.add_scalars('Loss/train_wd', 
-                   {
-                       'Sel clients':get_acc_loss(cent_x, cent_y, avg_model_sel, data_obj.dataset, weight_decay)[0],
-                       'All clients':get_acc_loss(cent_x, cent_y, all_model, data_obj.dataset, weight_decay)[0],
-                       'Current cloud':get_acc_loss(cent_x, cent_y, cur_cld_model, data_obj.dataset, weight_decay)[0]
-                   }, i
-                  )
+            # writer.add_scalars('Loss/train_wd', 
+            #        {
+            #            'Sel clients':get_acc_loss(cent_x, cent_y, avg_model_sel, data_obj.dataset, weight_decay)[0],
+            #            'All clients':get_acc_loss(cent_x, cent_y, all_model, data_obj.dataset, weight_decay)[0],
+            #            'Current cloud':get_acc_loss(cent_x, cent_y, cur_cld_model, data_obj.dataset, weight_decay)[0]
+            #        }, i
+            #       )
             
             #####
 
@@ -1012,21 +1041,21 @@ def train_FedDyn(data_obj, act_prob,
             tst_cur_cld_perf[i] = [loss_tst, acc_tst]
             
             
-            writer.add_scalars('Loss/test', 
-                   {
-                       'Sel clients':tst_sel_clt_perf[i][0],
-                       'All clients':tst_all_clt_perf[i][0],
-                       'Current cloud':tst_cur_cld_perf[i][0]
-                   }, i
-                  )
+            # writer.add_scalars('Loss/test', 
+            #        {
+            #            'Sel clients':tst_sel_clt_perf[i][0],
+            #            'All clients':tst_all_clt_perf[i][0],
+            #            'Current cloud':tst_cur_cld_perf[i][0]
+            #        }, i
+            #       )
             
-            writer.add_scalars('Accuracy/test', 
-                   {
-                       'Sel clients':tst_sel_clt_perf[i][1],
-                       'All clients':tst_all_clt_perf[i][1],
-                       'Current cloud':tst_cur_cld_perf[i][1]
-                   }, i
-                  )     
+            # writer.add_scalars('Accuracy/test', 
+            #        {
+            #            'Sel clients':tst_sel_clt_perf[i][1],
+            #            'All clients':tst_all_clt_perf[i][1],
+            #            'Current cloud':tst_cur_cld_perf[i][1]
+            #        }, i
+            #       )     
             
             if (not trial) and ((i+1) % save_period == 0):
                 torch.save(avg_model_sel.state_dict(), '%sModel/%s/%s/ins_avg_%dcom.pt' 

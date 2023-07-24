@@ -14,11 +14,12 @@ def get_acc_loss(data_x, data_y, model, dataset_name, w_decay = None):
     acc_overall = 0; loss_overall = 0;
     loss_fn = torch.nn.CrossEntropyLoss(reduction='sum')
     
-    batch_size = min(6000, data_x.shape[0])
-    batch_size = min(2000, data_x.shape[0])
+    # batch_size = min(6000, data_x.shape[0])
+    batch_size = min(256, data_x.shape[0])
     n_tst = data_x.shape[0]
     tst_gen = data.DataLoader(Dataset(data_x, data_y, dataset_name=dataset_name), batch_size=batch_size, shuffle=False)
-    model.eval(); model = model.to(device)
+    model.to(device)
+    model.eval() 
     with torch.no_grad():
         tst_gen_iter = tst_gen.__iter__()
         for i in range(int(np.ceil(n_tst/batch_size))):
@@ -71,34 +72,17 @@ def avg_models(mdl, clnt_models, weight_list):
     
     return mdl
 
-def train_model(model, trn_x, trn_y, tst_x, tst_y, learning_rate, batch_size, epoch, print_per, weight_decay, dataset_name, sch_step=1, sch_gamma=1):
+def train_model(model, trn_x, trn_y, tst_x, tst_y, learning_rate, batch_size, epoch, weight_decay, dataset_name):
     n_trn = trn_x.shape[0]
     trn_gen = data.DataLoader(Dataset(trn_x, trn_y, train=True, dataset_name=dataset_name), batch_size=batch_size, shuffle=True)                          
     loss_fn = torch.nn.CrossEntropyLoss(reduction='sum')
 
     optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
-    model.train(); model = model.to(device)
-    
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=sch_step, gamma=sch_gamma)
-
-    # Put tst_x=False if no tst data given
-    print_test = not isinstance(tst_x, bool)
-    
-    loss_trn, acc_trn = get_acc_loss(trn_x, trn_y, model, dataset_name, weight_decay)
-    if print_test:
-        loss_tst, acc_tst = get_acc_loss(tst_x, tst_y, model, dataset_name, 0)
-        print("Epoch %3d, Training Accuracy: %.4f, Loss: %.4f, Test Accuracy: %.4f, Loss: %.4f, LR: %.4f" 
-              %(0, acc_trn, loss_trn, acc_tst, loss_tst, scheduler.get_lr()[0]))
-    else:
-        print("Epoch %3d, Training Accuracy: %.4f, Loss: %.4f, LR: %.4f" 
-              %(0, acc_trn, loss_trn, scheduler.get_lr()[0]))
-    
     model.train()
+    model.to(device)
     
-    for e in range(epoch):
-        # Training
-        
+    for e in range(epoch):        
         trn_gen_iter = trn_gen.__iter__()
         for i in range(int(np.ceil(n_trn/batch_size))):
 
@@ -110,30 +94,17 @@ def train_model(model, trn_x, trn_y, tst_x, tst_y, learning_rate, batch_size, ep
             y_pred = model(batch_x)
             loss = loss_fn(y_pred, batch_y.reshape(-1).long())
 
-            
             loss = loss / list(batch_y.size())[0]
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=max_norm) # Clip gradients to prevent exploding
             optimizer.step()
-
-        if (e+1) % print_per == 0:
-            loss_trn, acc_trn = get_acc_loss(trn_x, trn_y, model, dataset_name, weight_decay)
-            if print_test:
-                loss_tst, acc_tst = get_acc_loss(tst_x, tst_y, model, dataset_name, 0)
-                print("Epoch %3d, Training Accuracy: %.4f, Loss: %.4f, Test Accuracy: %.4f, Loss: %.4f, LR: %.4f" 
-                      %(e+1, acc_trn, loss_trn, acc_tst, loss_tst, scheduler.get_lr()[0]))
-            else:
-                print("Epoch %3d, Training Accuracy: %.4f, Loss: %.4f, LR: %.4f" %(e+1, acc_trn, loss_trn, scheduler.get_lr()[0]))
-    
-            
-            model.train()
-        scheduler.step()
         
-    # Freeze model
-    for params in model.parameters():
-        params.requires_grad = False
-    model.eval()
+    loss_trn, acc_trn = get_acc_loss(trn_x, trn_y, model, dataset_name, weight_decay)
+    loss_tst, acc_tst = get_acc_loss(tst_x, tst_y, model, dataset_name, 0)
+    print(f"Epoch {e:3d}, Training Accuracy: {acc_trn:.4f}, Loss: {loss_trn:.4f}")
+    print(f"Epoch {e:3d}, Testing Accuracy: {acc_tst:.4f}, Loss: {loss_tst:.4f}")
+    model.train()
             
     return model
 

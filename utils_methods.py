@@ -115,18 +115,20 @@ def train_FedAvg(
                 for params in clnt_models[clnt].parameters():
                     params.requires_grad = True
                 
-                clnt_models[clnt] = train_model(
-                    clnt_models[clnt], 
-                    trn_x, 
-                    trn_y,
-                    tst_x, 
-                    tst_y, 
-                    args.lr, 
-                    args.batch_size, 
-                    args.epochs,                           
-                    args.weight_decay,                             
-                    data_obj.dataset, 
-                )
+                clnt_models[clnt] = train_model_wy(model=clnt_models[clnt], local_trainloader=, testloader=, epoch=args.epochs, weight_decay=args.weight_decay)
+
+                # clnt_models[clnt] = train_model(
+                #     clnt_models[clnt], 
+                #     trn_x, 
+                #     trn_y,
+                #     tst_x, 
+                #     tst_y, 
+                #     args.lr, 
+                #     args.batch_size, 
+                #     args.epochs,                           
+                #     args.weight_decay,                             
+                #     data_obj.dataset
+                # )
                 
                 clnt_params_list[clnt] = get_mdl_params([clnt_models[clnt]], n_par)[0]
 

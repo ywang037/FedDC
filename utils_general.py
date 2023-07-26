@@ -8,6 +8,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # from torch.utils.tensorboard import SummaryWriter
 
 import time
+
+from utils_libs_wy import evaluation
+
+
 max_norm = 10
 # --- Evaluate a NN model
 def get_acc_loss(data_x, data_y, model, dataset_name, w_decay = None):
@@ -76,7 +80,6 @@ def train_model(model, trn_x, trn_y, tst_x, tst_y, learning_rate, batch_size, ep
     n_trn = trn_x.shape[0]
     trn_gen = data.DataLoader(Dataset(trn_x, trn_y, train=True, dataset_name=dataset_name), batch_size=batch_size, shuffle=True)                          
     loss_fn = torch.nn.CrossEntropyLoss(reduction='sum')
-
     optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
     model.train()
@@ -103,6 +106,32 @@ def train_model(model, trn_x, trn_y, tst_x, tst_y, learning_rate, batch_size, ep
     loss_trn, acc_trn = get_acc_loss(trn_x, trn_y, model, dataset_name, weight_decay)
     loss_tst, acc_tst = get_acc_loss(tst_x, tst_y, model, dataset_name, 0)
     print(f"Epoch {e:3d}, Training Accuracy: {acc_trn:.4f}, Loss: {loss_trn:.4f}")
+    print(f"Epoch {e:3d}, Testing Accuracy: {acc_tst:.4f}, Loss: {loss_tst:.4f}")
+    model.train()
+            
+    return model
+
+def train_model_wy(model, local_trainloader, testloader, learning_rate, epoch, weight_decay):
+    r""" self-contained development of local trainer for fedavg
+    """
+    loss_fn = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+
+    model.train()
+    model.to(device)
+    
+    for e in range(epoch):        
+        for batch_x, batch_y in local_trainloader:
+            batch_x = batch_x.to(device)
+            batch_y = batch_y.to(device)
+            y_pred = model(batch_x)
+            loss = loss_fn(y_pred, batch_y)
+            optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=max_norm) # Clip gradients to prevent exploding
+            optimizer.step()
+        
+    loss_tst, acc_tst = evaluation(net=model, eval_loader=testloader, device=device)
     print(f"Epoch {e:3d}, Testing Accuracy: {acc_tst:.4f}, Loss: {loss_tst:.4f}")
     model.train()
             

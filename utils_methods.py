@@ -120,8 +120,8 @@ def train_FedAvg(
     record_accuracy(args.exp_dir, args.seed, best_glob_acc)
     torch.save(
         {
-            'global_model_test_loss': glob_loss,
-            'global_model_test_acc': glob_acc,
+            'global_model_test_loss': np.array(glob_loss),
+            'global_model_test_acc': np.array(glob_acc),
         },
         os.path.join(args.logdir, f'{args.dataset}-{args.model}-learning_curve-seed{args.seed}.pt')
     )

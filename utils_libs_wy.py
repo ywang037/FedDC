@@ -37,7 +37,7 @@ def get_logger(logger_path):
 def evaluation(net, eval_loader, device):
     ''' Use this function to evalute the loss and accuracy of a model
     '''
-
+    net.to(device)
     net.eval()
     criterion = nn.CrossEntropyLoss(reduction='sum').to(device)
     correct, loss = 0, 0.0

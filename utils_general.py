@@ -111,19 +111,19 @@ def train_model(model, trn_x, trn_y, tst_x, tst_y, learning_rate, batch_size, ep
             
     return model
 
-def train_model_wy(model, local_trainloader, testloader, learning_rate, epoch, weight_decay):
+def train_model_wy(args, model, local_trainloader, testloader):
     r""" self-contained development of local trainer for fedavg
     """
     loss_fn = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     model.train()
-    model.to(device)
+    model.to(args.device)
     
-    for e in range(epoch):        
+    for e in range(args.epoch):        
         for batch_x, batch_y in local_trainloader:
-            batch_x = batch_x.to(device)
-            batch_y = batch_y.to(device)
+            batch_x = batch_x.to(args.device)
+            batch_y = batch_y.to(args.device)
             y_pred = model(batch_x)
             loss = loss_fn(y_pred, batch_y)
             optimizer.zero_grad()
@@ -131,7 +131,7 @@ def train_model_wy(model, local_trainloader, testloader, learning_rate, epoch, w
             torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=max_norm) # Clip gradients to prevent exploding
             optimizer.step()
         
-    loss_tst, acc_tst = evaluation(net=model, eval_loader=testloader, device=device)
+    loss_tst, acc_tst = evaluation(net=model, eval_loader=testloader, device=args.device)
     print(f"Epoch {e:3d}, Testing Accuracy: {acc_tst:.4f}, Loss: {loss_tst:.4f}")
     model.train()
             

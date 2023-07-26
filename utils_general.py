@@ -120,7 +120,7 @@ def train_model_wy(args, model, local_trainloader, testloader):
     model.train()
     model.to(args.device)
     
-    for e in range(args.epoch):        
+    for e in range(args.epochs):        
         for batch_x, batch_y in local_trainloader:
             batch_x = batch_x.to(args.device)
             batch_y = batch_y.to(args.device)
@@ -131,11 +131,11 @@ def train_model_wy(args, model, local_trainloader, testloader):
             torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=max_norm) # Clip gradients to prevent exploding
             optimizer.step()
         
-    loss_tst, acc_tst = evaluation(net=model, eval_loader=testloader, device=args.device)
-    print(f"Epoch {e:3d}, Testing Accuracy: {acc_tst:.4f}, Loss: {loss_tst:.4f}")
-    model.train()
+    acc_tst, loss_tst = evaluation(net=model, eval_loader=testloader, device=args.device)
+    print(f"Epoch {e:2d}, Testing Accuracy: {acc_tst:.4f}, Loss: {loss_tst:.4f}")
+    # model.train()
             
-    return model
+    return model.state_dict()
 
 def train_model_prox(model, cld_mdl_param, trn_x, trn_y, tst_x, tst_y, learning_rate, batch_size, epoch, print_per, weight_decay, dataset_name, sch_step=1, sch_gamma=1):
     n_trn = trn_x.shape[0]
@@ -309,6 +309,7 @@ def train_scaffold_mdl(model, model_func, state_params_diff, trn_x, trn_y,
 
 def set_client_from_params(mdl, params):
     dict_param = copy.deepcopy(dict(mdl.named_parameters()))
+
     idx = 0
     for name, param in mdl.named_parameters():
         weights = param.data
@@ -316,7 +317,7 @@ def set_client_from_params(mdl, params):
         dict_param[name].data.copy_(torch.tensor(params[idx:idx+length].reshape(weights.shape)).to(device))
         idx += length
     
-    mdl.load_state_dict(dict_param)    
+    # mdl.load_state_dict(dict_param)    
     return mdl
 
 

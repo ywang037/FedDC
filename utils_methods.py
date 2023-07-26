@@ -32,26 +32,29 @@ def train_FedAvg(
         args,
         logger,
         model_func, 
-        init_model, 
+        init_model,
+        client_data_train,
+        test_data,
         overwrite=True, 
     ):
     time_start = time.time()
     n_clnt = args.n_parties
+    local_trainloaders = (DataLoader(client_data_train[i], batch_size=args.batch_size, shuffle=True) for i in range(args.n_parties))
+    central_testloader = DataLoader(test_data, batch_size=128, shuffle=False)
+    # # load and partition dataset
+    # ds, data_info = get_dataset(dataset=args.dataset)  
+    # split_distribution, dataidx_map_train = partition_labeldir(
+    #     targets=ds['train_labels'], 
+    #     num_classes=data_info['num_classes'], 
+    #     n_parties=n_clnt,
+    #     beta=args.beta
+    # )
+    # client_data_train = make_client_dataset_from_partition(ds['train_data'], n_clnt, dataidx_map_train)  
+    # logger.info('Client dataset partitioning completed')
+    # traindata_cls_counts = record_net_data_stats(ds['train_labels'], dataidx_map_train, logger)
     
-    # load and partition dataset
-    ds, data_info = get_dataset(dataset=args.dataset)  
-    split_distribution, dataidx_map_train = partition_labeldir(
-        targets=ds['train_labels'], 
-        num_classes=data_info['num_classes'], 
-        n_parties=n_clnt,
-        beta=args.beta
-    )
-    client_data_train = make_client_dataset_from_partition(ds['train_data'], n_clnt, dataidx_map_train)  
-    logger.info('Client dataset partitioning completed')
-    traindata_cls_counts = record_net_data_stats(ds['train_labels'], dataidx_map_train, logger)
-    
-    local_trainloaders = (DataLoader(client_data_train[i], batch_size=args.batch_size, shuffle=True) for i in range(n_clnt))
-    central_testloader = DataLoader(ds["test_data"], batch_size=128, shuffle=False)
+    # local_trainloaders = (DataLoader(client_data_train[i], batch_size=args.batch_size, shuffle=True) for i in range(n_clnt))
+    # central_testloader = DataLoader(ds["test_data"], batch_size=128, shuffle=False)
 
     # weights for aggregation
     weight_list = np.asarray([len(client_data_train[i]) for i in range(n_clnt)])
@@ -65,78 +68,80 @@ def train_FedAvg(
     n_par = len(get_mdl_params([model_func()])[0])
     init_par_list=get_mdl_params([init_model], n_par)[0]
     clnt_params_list=np.ones(n_clnt).astype('float32').reshape(-1, 1) * init_par_list.reshape(1, -1) # n_clnt X n_par
-    if not overwrite and os.path.exists(args.exp_dir):
-        logger.info("Detected existing experiment result, current run terminated.")
-        return
-    elif (overwrite and os.path.exists(args.exp_dir)) or not os.path.exists(args.exp_dir):       
-        os.makedirs(args.exp_dir)
-        all_model = model_func().to(device)
-        all_model.load_state_dict(copy.deepcopy(dict(init_model.named_parameters())))
-        best_glob_acc = 0
-        glob_loss, glob_acc = [], []
 
-        for i in range(args.comm_round):            
-            selected_clnts = list(range(n_clnt)) # WY added to include all clients
-            logger.info(f"Round {i:2d}: selected clients: {selected_clnts}")
-            del clnt_models
-            clnt_models = list(range(n_clnt))
-            
-            # WY NOTE: loop over clients for local update
-            for clnt in selected_clnts:
-                logger.info(f'Round {i:2d}: training client {clnt}')
-            
-                clnt_models[clnt] = model_func().to(device)    
-                clnt_models[clnt].load_state_dict(copy.deepcopy(dict(all_model.named_parameters())))
+    # if not overwrite and os.path.exists(args.exp_dir):
+    #     logger.info("Detected existing experiment result, current run terminated.")
+    #     return
+    # elif (overwrite and os.path.exists(args.exp_dir)) or not os.path.exists(args.exp_dir):       
+    #     os.makedirs(args.exp_dir)
 
-                for params in clnt_models[clnt].parameters():
-                    params.requires_grad = True
-                
-                clnt_models[clnt] = train_model_wy(
-                    args,
-                    model=clnt_models[clnt], 
-                    local_trainloader=local_trainloaders[clnt], 
-                    testloader=central_testloader
-                )
+    all_model = model_func().to(device)
+    all_model.load_state_dict(copy.deepcopy(dict(init_model.named_parameters())))
+    best_glob_acc = 0
+    glob_loss, glob_acc = [], []
 
-                clnt_params_list[clnt] = get_mdl_params([clnt_models[clnt]], n_par)[0]
-
-            # Scale with weights
-            all_model = set_client_from_params(model_func(), np.sum(clnt_params_list*weight_list/np.sum(weight_list), axis = 0)) # model aggregation?
-           
-            
-            # test performance of all clients over centralized test dataset
-            # WY NOTE: this is the only accuracy you need to keep and monitor
-            acc_tst, loss_tst = evaluation(all_model, central_testloader, args.device)
-            glob_loss.append(loss_tst)
-            glob_acc.append(acc_tst)
-            if acc_tst>best_glob_acc:
-                best_glob_acc = acc_tst
-                torch.save(
-                    {
-                        'model_checkpoint': all_model.state_dict(), 
-                    },
-                    os.path.join(args.logdir, 'checkpoint_fed_mdl.pt')
-                )
-                logger.info('Round {i:2d}: global model checkpoint saved')
-                    
-            # tst_perf_all[i] = [loss_tst, acc_tst]
-            print(f"**** Communication round {i:2d}, Test Accuracy: {acc_tst:.4f}, Loss: {loss_tst:.4f}" %(i+1, acc_tst, loss_tst))
-            
-        record_accuracy(args.exp_dir, args.seed, best_glob_acc)
-        torch.save(
-            {
-                'global_model_test_loss': glob_loss,
-                'global_model_test_acc': glob_acc,
-            },
-            f'{args.dataset}-{args.model}-learning_curve-seed{args.seed}.pt'
-        )
+    for i in range(args.comm_round):            
+        selected_clnts = list(range(n_clnt)) # WY added to include all clients
+        logger.info(f"Round {i:2d}: selected clients: {selected_clnts}")
+        del clnt_models
+        clnt_models = list(range(n_clnt))
         
-        time_end = time.time()
-        time_end_stamp = time.strftime('%Y-%m-%d %H:%M:%S') # time_end_stamp = time.strftime('%y-%m-%d-%H-%M-%S')
-        sesseion_time = int((time_end-time_start)/60)   
-        logger.info('\nSession completed at {}, time elapsed: {} mins. That\'s all folks.'.format(time_end_stamp, sesseion_time))
+        # WY NOTE: loop over clients for local update
+        for clnt in selected_clnts:
+            logger.info(f'Round {i:2d}: training client {clnt}')
+        
+            clnt_models[clnt] = model_func().to(device)    
+            clnt_models[clnt].load_state_dict(copy.deepcopy(dict(all_model.named_parameters())))
 
-        return
+            for params in clnt_models[clnt].parameters():
+                params.requires_grad = True
+            
+            clnt_models[clnt] = train_model_wy(
+                args,
+                model=clnt_models[clnt], 
+                local_trainloader=local_trainloaders[clnt], 
+                testloader=central_testloader
+            )
+
+            clnt_params_list[clnt] = get_mdl_params([clnt_models[clnt]], n_par)[0]
+
+        # Scale with weights
+        all_model = set_client_from_params(model_func(), np.sum(clnt_params_list*weight_list/np.sum(weight_list), axis = 0)) # model aggregation?
+        
+        
+        # test performance of all clients over centralized test dataset
+        # WY NOTE: this is the only accuracy you need to keep and monitor
+        acc_tst, loss_tst = evaluation(all_model, central_testloader, args.device)
+        glob_loss.append(loss_tst)
+        glob_acc.append(acc_tst)
+        if acc_tst>best_glob_acc:
+            best_glob_acc = acc_tst
+            torch.save(
+                {
+                    'model_checkpoint': all_model.state_dict(), 
+                },
+                os.path.join(args.logdir, 'checkpoint_fed_mdl.pt')
+            )
+            logger.info('Round {i:2d}: global model checkpoint saved')
+                
+        # tst_perf_all[i] = [loss_tst, acc_tst]
+        print(f"**** Communication round {i:2d}, Test Accuracy: {acc_tst:.4f}, Loss: {loss_tst:.4f}" %(i+1, acc_tst, loss_tst))
+        
+    record_accuracy(args.exp_dir, args.seed, best_glob_acc)
+    torch.save(
+        {
+            'global_model_test_loss': glob_loss,
+            'global_model_test_acc': glob_acc,
+        },
+        f'{args.dataset}-{args.model}-learning_curve-seed{args.seed}.pt'
+    )
+    
+    time_end = time.time()
+    time_end_stamp = time.strftime('%Y-%m-%d %H:%M:%S') # time_end_stamp = time.strftime('%y-%m-%d-%H-%M-%S')
+    sesseion_time = int((time_end-time_start)/60)   
+    logger.info('\nSession completed at {}, time elapsed: {} mins. That\'s all folks.'.format(time_end_stamp, sesseion_time))
+
+    return
 
 def train_FedProx(data_obj, act_prob ,learning_rate, batch_size, epoch, 
                                      com_amount, print_per, weight_decay, 

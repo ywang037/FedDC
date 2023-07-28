@@ -421,40 +421,37 @@ def train_model_alg(model, model_func, alpha_coef, avg_mdl_param, hist_params_di
 
 
 
-def train_model_FedDC(model, model_func, alpha, local_update_last, global_update_last, global_model_param, hist_i, trn_x, trn_y, 
-                    learning_rate, batch_size, epoch, print_per,
-                    weight_decay, dataset_name, sch_step, sch_gamma):
+def train_model_FedDC_wy(
+        args,
+        model,
+        local_trainloader,
+        testloader,  
+        alpha, 
+        local_update_last, 
+        global_update_last, 
+        global_model_param, 
+        hist_i
+    ):
     
-    n_trn = trn_x.shape[0]
-    state_update_diff = torch.tensor(-local_update_last+ global_update_last,  dtype=torch.float32, device=device)  
-    trn_gen = data.DataLoader(Dataset(trn_x, trn_y, train=True, dataset_name=dataset_name), batch_size=batch_size, shuffle=True)
-    loss_fn = torch.nn.CrossEntropyLoss(reduction='sum')
-    
-    optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
-    model.train(); model = model.to(device)
+    state_update_diff = torch.tensor(-local_update_last+ global_update_last,  dtype=torch.float32, device=device)  
     
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=sch_step, gamma=sch_gamma)
+    loss_fn = torch.nn.CrossEntropyLoss()    
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+
     model.train()
+    model.to(device)
     
-    n_par = get_mdl_params([model_func()]).shape[1]
-    
-    
-    for e in range(epoch):
-        # Training
-        epoch_loss = 0
-        trn_gen_iter = trn_gen.__iter__()
-        for i in range(int(np.ceil(n_trn/batch_size))):
-            batch_x, batch_y = trn_gen_iter.__next__()
+    for e in range(args.epochs):
+        # epoch_loss = 0
+        
+        for batch_x, batch_y in local_trainloader:
             batch_x = batch_x.to(device)
             batch_y = batch_y.to(device)
-            
             y_pred = model(batch_x)
             
             ## Get f_i estimate 
             loss_f_i = loss_fn(y_pred, batch_y.reshape(-1).long())
-
-                
             loss_f_i = loss_f_i / list(batch_y.size())[0]
             
             local_parameter = None
@@ -465,34 +462,18 @@ def train_model_FedDC(model, model_func, alpha, local_update_last, global_update
                 else:
                     local_parameter = torch.cat((local_parameter, param.reshape(-1)), 0)
             
-            loss_cp = alpha/2 * torch.sum((local_parameter - (global_model_param - hist_i))*(local_parameter - (global_model_param - hist_i)))
+            loss_cp = alpha/2 * torch.sum((local_parameter - (global_model_param - hist_i))**2)
             loss_cg = torch.sum(local_parameter * state_update_diff) 
             
 
             loss = loss_f_i + loss_cp + loss_cg
             optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=max_norm) # Clip gradients to prevent exploding
+            # torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=max_norm) # Clip gradients to prevent exploding
             optimizer.step()
-            epoch_loss += loss.item() * list(batch_y.size())[0]
+            # epoch_loss += loss.item() * list(batch_y.size())[0]
 
-        if (e+1) % print_per == 0:
-            epoch_loss /= n_trn
-            if weight_decay != None:
-                # Add L2 loss to complete f_i
-                params = get_mdl_params([model], n_par)
-                epoch_loss += (weight_decay)/2 * np.sum(params * params)
-            
-            print("Epoch %3d, Training Loss: %.4f, LR: %.5f"
-                  %(e+1, epoch_loss, scheduler.get_lr()[0]))
-            
-            
-            model.train()
-        scheduler.step()
-    
-    # Freeze model
-    for params in model.parameters():
-        params.requires_grad = False
-    model.eval()
-            
-    return model
+    acc_tst, loss_tst = evaluation(net=model, eval_loader=testloader, device=args.device)
+    print(f"Epoch {e:2d}, Testing Accuracy: {acc_tst:.4f}, Loss: {loss_tst:.4f}")
+
+    return model.state_dict()

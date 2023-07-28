@@ -4,7 +4,8 @@ import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import csv
+import datetime
 # from scipy.linalg import sqrtm
 import matplotlib.pyplot as plt
 
@@ -87,3 +88,21 @@ def plot_series(
 
     if save_path is not None:
         plt.savefig(save_path)
+
+def record_accuracy(save_path, seed, best_acc):
+    # File path
+    file_path = os.path.join(save_path, 'records.csv')
+
+    # Check if file exists to decide if headers are needed
+    file_exists = os.path.isfile(file_path)
+
+    # Open the file in append mode, create it if it doesn't exist
+    with open(file_path, 'a', newline='') as f:
+        writer = csv.writer(f)
+        
+        # Write headers if the file is newly created
+        if not file_exists:
+            writer.writerow([ 'seed', 'best_acc', 'timestamp'])
+
+        # Write the data
+        writer.writerow([seed, best_acc, datetime.datetime.now()])

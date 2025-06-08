@@ -186,10 +186,12 @@ def train_FedDC_wy(
         delta_g_cur = 1 / n_clnt * delta_g_sum  
         state_gadient_diffs[-1] += delta_g_cur 
          
-        fed_model_param = np.sum(clnt_params_list*weight_list/np.sum(weight_list), axis = 0) # do model parameter weighted average: model aggregation
+        # fed_model_param = np.sum(clnt_params_list*weight_list/np.sum(weight_list), axis = 0) # do model parameter weighted average: model aggregation
+        fed_model_param = np.mean(clnt_params_list, axis = 0) # do model parameter weighted average: model aggregation
         fed_model = set_client_from_params(fed_model, fed_model_param) # normal fedavg global model without local drift correction
         
-        loc_param_drift_correction = np.sum(parameter_drifts*weight_list/np.sum(weight_list), axis = 0)
+        # loc_param_drift_correction = np.sum(parameter_drifts*weight_list/np.sum(weight_list), axis = 0)
+        loc_param_drift_correction = np.mean(parameter_drifts, axis = 0)
         cld_mdl_param = fed_model_param + loc_param_drift_correction
         cur_cld_model = set_client_from_params(cur_cld_model.to(device), cld_mdl_param) # update the parameters of current cloud model
 
